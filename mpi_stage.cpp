@@ -1,8 +1,10 @@
 #include <mpi.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <limits.h>
 
 #include <cstring>
 #include <string>
@@ -57,12 +59,44 @@ uint64_t hash_file(const std::string& path) {
     return h.digest();
 }
 
-[[noreturn]] void die(const std::string& msg, MPI_Comm comm) {
+std::string get_hostname() {
+    char hostname[HOST_NAME_MAX + 1];
+    if (gethostname(hostname, sizeof(hostname)) == 0)
+        return std::string(hostname);
+    return "unknown";
+}
+
+[[noreturn]] void die(const std::string& msg, MPI_Comm comm, int err = 0) {
     int rank; MPI_Comm_rank(comm, &rank);
-    if (rank == 0)
-        std::cerr << "ERROR: " << msg << std::endl;
+    std::string full_msg = "[" + get_hostname() + "] " + msg;
+    if (err != 0)
+        full_msg += ": " + std::string(strerror(err));
+    std::cerr << "ERROR: " << full_msg << std::endl;
     MPI_Abort(comm, 1);
     std::exit(1);
+}
+
+bool mkdir_p(const std::string& path) {
+    std::string dir;
+    for (size_t i = 0; i < path.size(); ++i) {
+        dir += path[i];
+        if (path[i] == '/' && i > 0) {
+            if (mkdir(dir.c_str(), 0755) != 0 && errno != EEXIST)
+                return false;
+        }
+    }
+    return true;
+}
+
+std::string parent_dir(const std::string& path) {
+    size_t pos = path.rfind('/');
+    if (pos == std::string::npos || pos == 0)
+        return "/";
+    return path.substr(0, pos);
+}
+
+bool check_dir_writable(const std::string& dir) {
+    return access(dir.c_str(), W_OK) == 0;
 }
 
 /* ===========================
@@ -194,6 +228,29 @@ int main(int argc, char** argv) {
 
     auto t_pre = my_clock::now();
 
+    // --- Pre-flight check: ensure destination directory exists and is writable ---
+    if (need_copy) {
+        std::string dest_dir = parent_dir(dst);
+        
+        // Create parent directories if they don't exist
+        if (!mkdir_p(dest_dir + "/")) {
+            int err = errno;
+            die("Failed to create destination directory '" + dest_dir + "'", world, err);
+        }
+        
+        // Check write permissions
+        if (!check_dir_writable(dest_dir)) {
+            int err = errno;
+            die("Destination directory '" + dest_dir + "' is not writable", world, err);
+        }
+        
+        // Synchronize after pre-flight checks
+        MPI_Barrier(world);
+        
+        if (verbose && rank == 0)
+            std::cerr << "[0] Pre-flight check passed: destination directory ready\n";
+    }
+
     // --- Copy phase ---
     if (need_copy) {
         int color = 1; // all ranks participate
@@ -212,12 +269,18 @@ int main(int argc, char** argv) {
         int fd_in = -1, fd_out = -1;
         if (rank == source_rank) {
             fd_in = open(src.c_str(), O_RDONLY);
-            if (fd_in < 0) die("Failed to open source", copy_comm);
+            if (fd_in < 0) {
+                int err = errno;
+                die("Failed to open source file '" + src + "'", copy_comm, err);
+            }
             if (!source_writes) fd_out = -1;
         }
         if (rank != source_rank || source_writes) {
             fd_out = open(dst.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0644);
-            if (fd_out < 0) die("Failed to open dest", copy_comm);
+            if (fd_out < 0) {
+                int err = errno;
+                die("Failed to open destination file '" + dst + "'", copy_comm, err);
+            }
         }
 
         FastHash64 dst_hash;
@@ -241,8 +304,10 @@ int main(int argc, char** argv) {
 
             if (rank != source_rank || source_writes) {
                 ssize_t w = pwrite(fd_out, dbuf.buf[dbuf.cur].data(), bytes[dbuf.cur], offset);
-                if (w != bytes[dbuf.cur])
-                    die("Write failed", copy_comm);
+                if (w != bytes[dbuf.cur]) {
+                    int err = errno;
+                    die("Write failed to '" + dst + "' at offset " + std::to_string(offset), copy_comm, err);
+                }
                 if (post_val == CHECKSUM)
                     dst_hash.update(dbuf.buf[dbuf.cur].data(), bytes[dbuf.cur]);
             }
@@ -282,12 +347,13 @@ int main(int argc, char** argv) {
         if (post_val == SIZE) {
             FileInfo fi = stat_file(dst);
             if (fi.size != canonical_size)
-                die("Post-validation size mismatch", world);
+                die("Post-validation size mismatch for '" + dst + "': expected " + 
+                    std::to_string(canonical_size) + " bytes, got " + std::to_string(fi.size), world);
         } else if (post_val == CHECKSUM) {
             FastHash64 h;
             uint64_t hval = hash_file(dst);
             if (hval != canonical_hash)
-                die("Post-validation checksum mismatch", world);
+                die("Post-validation checksum mismatch for '" + dst + "'", world);
         }
         if (verbose && rank == 0)
             std::cerr << "[0] Post-validation complete\n";
