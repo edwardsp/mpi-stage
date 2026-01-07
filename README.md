@@ -23,7 +23,7 @@
 ```bash
 git clone https://github.com/edwardsp/mpi-stage.git
 cd mpi-stage
-mpicxx -O3 -std=c++17 mpi_stage.cpp -o mpi-stage
+make
 ```
 
 ---
