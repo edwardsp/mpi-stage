@@ -123,10 +123,10 @@ Loading mpi/hpcx
 [0] Post-validation complete
 [0] Timings (s):
   Topology check:    5.22463
-  Source metadata:   -0.00803746
-  Pre-validation:    -0.0046786
-  Copy phase:        -5.21189
-  Post-validation:   -2.2944e-05
+  Source metadata:   0.00803746
+  Pre-validation:    0.0046786
+  Copy phase:        5.21189
+  Post-validation:   2.2944e-05
   Total time:        5.2563
 ```
 
