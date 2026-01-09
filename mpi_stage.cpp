@@ -120,6 +120,10 @@ double seconds_since(my_clock::time_point t0) {
     return std::chrono::duration<double>(my_clock::now() - t0).count();
 }
 
+double seconds_between(my_clock::time_point t1, my_clock::time_point t0) {
+    return std::chrono::duration<double>(t1 - t0).count();
+}
+
 /* ===========================
    Main
    =========================== */
@@ -362,12 +366,12 @@ int main(int argc, char** argv) {
 
     if (verbose && rank == 0) {
         std::cerr << "[0] Timings (s):\n";
-        std::cerr << "  Topology check:    " << seconds_since(t_topo) << "\n";
-        std::cerr << "  Source metadata:   " << seconds_since(t_source) - seconds_since(t_topo) << "\n";
-        std::cerr << "  Pre-validation:    " << seconds_since(t_pre) - seconds_since(t_source) << "\n";
-        std::cerr << "  Copy phase:        " << seconds_since(t_copy) - seconds_since(t_pre) << "\n";
-        std::cerr << "  Post-validation:   " << seconds_since(t_post) - seconds_since(t_copy) << "\n";
-        std::cerr << "  Total time:        " << seconds_since(t_start) << "\n";
+        std::cerr << "  Topology check:    " << seconds_between(t_topo, t_start) << "\n";
+        std::cerr << "  Source metadata:   " << seconds_between(t_source, t_topo) << "\n";
+        std::cerr << "  Pre-validation:    " << seconds_between(t_pre, t_source) << "\n";
+        std::cerr << "  Copy phase:        " << seconds_between(t_copy, t_pre) << "\n";
+        std::cerr << "  Post-validation:   " << seconds_between(t_post, t_copy) << "\n";
+        std::cerr << "  Total time:        " << seconds_between(t_post, t_start) << "\n";
     }
 
     MPI_Finalize();
