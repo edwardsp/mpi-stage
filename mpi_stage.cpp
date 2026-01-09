@@ -208,7 +208,6 @@ int main(int argc, char** argv) {
         if (verbose && rank == 0)
             std::cerr << "[0] Source checksum computed: " << canonical_hash << "\n";
     }
-    auto t_meta = my_clock::now();
 
     // --- Pre-validation ---
     FileInfo dst_info = stat_file(dst);
